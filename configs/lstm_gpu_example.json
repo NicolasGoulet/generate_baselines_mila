@@ -1,0 +1,36 @@
+{
+  "run_id": "strict_naturalistic_additive_lstm_gpu_example",
+  "train_csv": "../communicative_efficiency/data/example/train_child_rows.csv",
+  "target_csv": "../communicative_efficiency/data/example/target_child_rows.csv",
+  "output_csv": "results/generated/lstm_additive_child_baselines.csv.gz",
+  "text_column": "utterance_clean",
+  "target_text_column": "target_utterance_clean",
+  "id_columns": ["utterance_id"],
+  "carry_columns": [
+    "dataset",
+    "child_id",
+    "session_id",
+    "age_months",
+    "age_bin",
+    "context_text"
+  ],
+  "age_bin_column": "age_bin",
+  "age_bins": [
+    "006-023",
+    "024-029",
+    "030-035",
+    "036-041",
+    "042-047",
+    "048-053",
+    "054-059",
+    "060-065"
+  ],
+  "context_column": "context_text",
+  "context_tail_words": 32,
+  "same_length": true,
+  "samples_per_target": 1,
+  "seed": 13,
+  "device": "cuda",
+  "batch_size": 128,
+  "epochs": 20
+}
