@@ -62,16 +62,33 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
 Run the cross-repo smoke test on Mila after cloning the three modular sibling
-repos:
+repos into a permanent code location under `$HOME`. The smoke outputs default
+to `$SCRATCH/modular_repo_smoke/<job_id>`; keep the Git checkouts out of
+scratch and put only job artifacts there.
 
 ```bash
-cd /network/scratch/g/gouletn/generate_baselines_mila
-sbatch slurm/modular_repos_smoke.sbatch
+mkdir -p "$HOME/communicative_efficiency_repos"
+cd "$HOME/communicative_efficiency_repos"
+git clone git@github.com:NicolasGoulet/generate_baselines_mila.git
+git clone git@github.com:NicolasGoulet/bayes_efficiency_mila.git
+git clone git@github.com:NicolasGoulet/child_complexity_predictors.git
+
+cd "$HOME/communicative_efficiency_repos/generate_baselines_mila"
+mkdir -p "$SCRATCH/modular_repo_smoke_logs"
+sbatch --output="$SCRATCH/modular_repo_smoke_logs/modular-smoke-%j.out" slurm/modular_repos_smoke.sbatch
 ```
 
 This tests `generate_baselines_mila`, `bayes_efficiency_mila`, and
 `child_complexity_predictors`. It does not require cloning
 `communicative_efficiency` on Mila.
+
+After rsyncing the smoke output you need, remove the scratch job directory and
+log:
+
+```bash
+bash "$SCRATCH/modular_repo_smoke/<job_id>/cleanup_after_rsync.sh"
+rm -f -- "$SCRATCH/modular_repo_smoke_logs/modular-smoke-<job_id>.out"
+```
 
 ## Manifest Contract
 
@@ -107,4 +124,6 @@ Every output has a JSON audit sidecar with row counts and file checksums.
 
 Do not commit CHILDES data, generated utterance CSVs, model checkpoints, logs,
 or scored outputs. Transfer large inputs/outputs with `rsync` or cluster
-storage.
+storage. On Mila, keep permanent Git checkouts in `$HOME`; write production
+outputs, temporary files, and rsynced full datasets under `$SCRATCH`, then clean
+them after they have been retrieved or are no longer needed.

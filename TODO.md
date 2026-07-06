@@ -17,6 +17,9 @@ and must not replace previous PBM proof-of-concept outputs.
 - [x] Keep Git limited to code, tests, docs, Slurm scripts, tiny synthetic
       fixtures, and manifest templates. Move real cleaned data, generated
       utterances, model checkpoints, and run outputs with `rsync`.
+- [x] On Mila, keep the permanent Git checkouts in `$HOME` as sibling repos;
+      write job outputs, temporary data, and rsynced full datasets under
+      `$SCRATCH`, then remove scratch job directories after retrieval.
 - [x] Provide Slurm scripts that `cd` to repo root and set `PYTHONPATH=src`.
 - [x] Keep the cross-repo Mila smoke runner in this execution repo:
       `slurm/modular_repos_smoke.sbatch`. Mila smoke testing requires only the

@@ -15,7 +15,8 @@ BAYES_REPO="${BAYES_REPO:-${PROJET_ROOT}/bayes_efficiency_mila}"
 COMPLEXITY_REPO="${COMPLEXITY_REPO:-${PROJET_ROOT}/child_complexity_predictors}"
 PYTHON_CMD="${PYTHON_CMD:-${PYTHON:-python3}}"
 read -r -a PYTHON_RUN <<< "${PYTHON_CMD}"
-SMOKE_ROOT="${SMOKE_ROOT:-${GENERATE_REPO}/results/modular_repo_smoke/${SLURM_JOB_ID:-manual}}"
+SMOKE_BASE="${SMOKE_BASE:-${SCRATCH:-${GENERATE_REPO}/results}/modular_repo_smoke}"
+SMOKE_ROOT="${SMOKE_ROOT:-${SMOKE_BASE}/${SLURM_JOB_ID:-manual}}"
 
 mkdir -p "${SMOKE_ROOT}"
 
@@ -24,6 +25,9 @@ echo "Generate repo: ${GENERATE_REPO}"
 echo "Bayes repo: ${BAYES_REPO}"
 echo "Complexity repo: ${COMPLEXITY_REPO}"
 echo "Python command: ${PYTHON_CMD}"
+echo "Smoke output base: ${SMOKE_BASE}"
+echo "After rsyncing any needed outputs, remove this scratch directory:"
+echo "  rm -rf -- '${SMOKE_ROOT}'"
 
 run_generate_smoke() {
   local repo="${GENERATE_REPO}"
@@ -188,6 +192,15 @@ run_generate_smoke
 run_bayes_smoke
 run_complexity_smoke
 
+cat > "${SMOKE_ROOT}/cleanup_after_rsync.sh" <<SH
+#!/bin/bash
+set -euo pipefail
+rm -rf -- '${SMOKE_ROOT}'
+SH
+chmod +x "${SMOKE_ROOT}/cleanup_after_rsync.sh"
+
 find "${SMOKE_ROOT}" -maxdepth 4 -type f | sort > "${SMOKE_ROOT}/produced_files.txt"
 echo "All modular repo smoke checks completed." > "${SMOKE_ROOT}/SUCCESS.txt"
 echo "Outputs written under ${SMOKE_ROOT}"
+echo "After rsyncing any needed outputs, clean scratch with:"
+echo "  rm -rf -- '${SMOKE_ROOT}'"
