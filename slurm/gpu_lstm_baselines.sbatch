@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${REPO_ROOT}"
+export PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}"
+
 MANIFEST="${1:-configs/lstm_gpu_example.json}"
 PYTHON_BIN="${PYTHON:-python3}"
 
