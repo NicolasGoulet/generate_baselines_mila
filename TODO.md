@@ -18,6 +18,10 @@ and must not replace previous PBM proof-of-concept outputs.
       fixtures, and manifest templates. Move real cleaned data, generated
       utterances, model checkpoints, and run outputs with `rsync`.
 - [x] Provide Slurm scripts that `cd` to repo root and set `PYTHONPATH=src`.
+- [x] Keep the cross-repo Mila smoke runner in this execution repo:
+      `slurm/modular_repos_smoke.sbatch`. Mila smoke testing requires only the
+      three modular sibling repos, not the local `communicative_efficiency`
+      brain repo.
 - [ ] Add production manifests that point to the actual Mila-side strict
       naturalistic bundle exports, not local laptop example paths.
 - [ ] Add a manifest audit command that checks required columns, duplicate row

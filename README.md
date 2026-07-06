@@ -9,13 +9,16 @@ large scored outputs, Mistral scoring, or supervisor-facing reports.
 
 ## Repo Boundary
 
-- `communicative_efficiency`: project brain, data links, analysis tables,
-  reports, design notes, and compact audits.
+- `communicative_efficiency`: local project brain, data links, analysis
+  tables, reports, design notes, and compact audits. It is not required on
+  Mila for the modular smoke test.
 - `compute_surprisal_mila`: neural surprisal scoring on Mila.
 - `generate_baselines_mila`: baseline utterance generation on CPU or GPU
   clusters.
-- Future `bayes_efficiency_mila`: Bayes-style `p(c | u)` likelihood scoring
-  and posterior/decomposition tables.
+- `bayes_efficiency_mila`: Bayes-style `p(c | u)` likelihood scoring and
+  posterior/decomposition tables.
+- `child_complexity_predictors`: MLU, vocabulary, and complexity predictor
+  extraction.
 
 ## Compute Lanes
 
@@ -57,6 +60,18 @@ Run the unit tests:
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
+
+Run the cross-repo smoke test on Mila after cloning the three modular sibling
+repos:
+
+```bash
+cd /network/scratch/g/gouletn/generate_baselines_mila
+sbatch slurm/modular_repos_smoke.sbatch
+```
+
+This tests `generate_baselines_mila`, `bayes_efficiency_mila`, and
+`child_complexity_predictors`. It does not require cloning
+`communicative_efficiency` on Mila.
 
 ## Manifest Contract
 
