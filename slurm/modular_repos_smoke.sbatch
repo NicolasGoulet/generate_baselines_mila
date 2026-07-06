@@ -7,8 +7,12 @@
 
 set -euo pipefail
 
-THIS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GENERATE_REPO="$(cd "${THIS_SCRIPT_DIR}/.." && pwd)"
+if [[ -n "${SLURM_SUBMIT_DIR:-}" && -d "${SLURM_SUBMIT_DIR}/src/generate_baselines_mila" ]]; then
+  GENERATE_REPO="$(cd "${SLURM_SUBMIT_DIR}" && pwd)"
+else
+  THIS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  GENERATE_REPO="$(cd "${THIS_SCRIPT_DIR}/.." && pwd)"
+fi
 PROJET_ROOT="$(cd "${GENERATE_REPO}/.." && pwd)"
 
 BAYES_REPO="${BAYES_REPO:-${PROJET_ROOT}/bayes_efficiency_mila}"
