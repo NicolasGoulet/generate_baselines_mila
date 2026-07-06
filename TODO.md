@@ -14,6 +14,9 @@ and must not replace previous PBM proof-of-concept outputs.
 - [x] Preserve input row ids, context ids, age bins, child/session provenance,
       and source-model labels in all outputs.
 - [x] Keep large data, generated outputs, logs, and checkpoints out of Git.
+- [x] Keep Git limited to code, tests, docs, Slurm scripts, tiny synthetic
+      fixtures, and manifest templates. Move real cleaned data, generated
+      utterances, model checkpoints, and run outputs with `rsync`.
 - [x] Provide Slurm scripts that `cd` to repo root and set `PYTHONPATH=src`.
 - [ ] Add production manifests that point to the actual Mila-side strict
       naturalistic bundle exports, not local laptop example paths.
@@ -62,6 +65,12 @@ and must not replace previous PBM proof-of-concept outputs.
 - [ ] Add manifest-level metadata for training scope:
       `pbm_only`, `strict_naturalistic`, `leave_corpus_out`, or other explicit
       scope labels.
+- [ ] Add PBM cleaned-data integration manifests using existing
+      `compute_surprisal_mila/data/{Brown,Manchester,Providence}/*/chi.csv`
+      as the first real-data test layer.
+- [ ] After synthetic and PBM integration tests pass, run full
+      strict-naturalistic generation only from data transferred to Mila with
+      `rsync`.
 
 ## Verification Commands
 
