@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 
+from .lstm import run_lstm_generation
 from .manifest import BaselineManifest
 from .ngram import run_ngram_generation
 
@@ -27,21 +28,9 @@ def cmd_generate_ngram(args: argparse.Namespace) -> int:
 
 def cmd_generate_lstm(args: argparse.Namespace) -> int:
     manifest = BaselineManifest.from_path(args.manifest)
-    print(
-        json.dumps(
-            {
-                "status": "not_implemented",
-                "run_id": manifest.run_id,
-                "message": (
-                    "The LSTM cluster command is scaffolded but has not been "
-                    "ported into this lightweight repo yet. Use this command "
-                    "only after adding real training/generation code and tests."
-                ),
-            },
-            indent=2,
-        )
-    )
-    return 2
+    audit = run_lstm_generation(manifest)
+    print(json.dumps({"status": "ok", "audit_json": str(manifest.audit_json), "row_count": audit["row_count"]}, indent=2))
+    return 0
 
 
 def cmd_describe_compute_lanes(_: argparse.Namespace) -> int:
