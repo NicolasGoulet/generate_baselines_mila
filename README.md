@@ -55,6 +55,16 @@ Generate CPU n-gram baselines:
 python3 -m generate_baselines_mila generate-ngram --manifest configs/ngram_additive_example.json
 ```
 
+Prepare and run the full strict-naturalistic 79-child n-gram baseline job on
+Mila after the bundle has been extracted under scratch:
+
+```bash
+cd "$HOME/communicative_efficiency_repos/generate_baselines_mila"
+sbatch --output="$SCRATCH/full79-ngram-%j.out" \
+  slurm/full_79_ngram_baselines.sbatch \
+  "$SCRATCH/communicative_efficiency_data/big_cleaned_dataset/default_naturalistic_merged_006_023"
+```
+
 Run the unit tests:
 
 ```bash

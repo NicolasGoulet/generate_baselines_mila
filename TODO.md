@@ -25,7 +25,7 @@ and must not replace previous PBM proof-of-concept outputs.
       `slurm/modular_repos_smoke.sbatch`. Mila smoke testing requires only the
       three modular sibling repos, not the local `communicative_efficiency`
       brain repo.
-- [ ] Add production manifests that point to the actual Mila-side strict
+- [x] Add production manifests that point to the actual Mila-side strict
       naturalistic bundle exports, not local laptop example paths.
 - [ ] Add a manifest audit command that checks required columns, duplicate row
       ids, empty target utterances, age-bin coverage, and output collision risk
@@ -75,6 +75,9 @@ and must not replace previous PBM proof-of-concept outputs.
 - [ ] Add PBM cleaned-data integration manifests using existing
       `compute_surprisal_mila/data/{Brown,Manchester,Providence}/*/chi.csv`
       as the first real-data test layer.
+- [x] Add a full-79 production Slurm entrypoint that builds its manifest from
+      the extracted strict-naturalistic bundle on scratch:
+      `slurm/full_79_ngram_baselines.sbatch`.
 - [ ] After synthetic and PBM integration tests pass, run full
       strict-naturalistic generation only from data transferred to Mila with
       `rsync`.

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from generate_baselines_mila.big_cleaned import prepare_full_79_ngram_manifest
 from generate_baselines_mila.manifest import BaselineManifest
 from generate_baselines_mila.ngram import run_ngram_generation
 from generate_baselines_mila.tokenize import tokenize_words
@@ -21,6 +22,69 @@ def write_csv(path: Path, rows: list[dict[str, str]]) -> None:
 
 
 class NgramGenerationTests(unittest.TestCase):
+    def test_prepare_full79_manifest_from_big_cleaned_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle = root / "bundle"
+            child_dir = bundle / "preprocessed_data" / "Brown" / "Adam"
+            child_dir.mkdir(parents=True)
+            write_csv(
+                bundle / "manifest.csv",
+                [
+                    {
+                        "dataset": "Brown",
+                        "child_id": "Adam",
+                        "child_scoring_ready": "1",
+                        "child_scoring_csv": "preprocessed_data/Brown/Adam/chi.surprisal_scoring.csv",
+                    }
+                ],
+            )
+            write_csv(
+                child_dir / "chi.surprisal_scoring.csv",
+                [
+                    {
+                        "dataset": "Brown",
+                        "child_id": "Adam",
+                        "source_group": "Brown",
+                        "session_id": "1",
+                        "age_months": "27.1",
+                        "file": "Adam/a.cha",
+                        "line_no": "10",
+                        "utt_id": "1",
+                        "context_k1": "want milk?",
+                        "context_k2": "do you want milk?",
+                        "context_k3": "do you want milk?",
+                        "chi_utterance_clean": "more milk",
+                    },
+                    {
+                        "dataset": "Brown",
+                        "child_id": "Adam",
+                        "source_group": "Brown",
+                        "session_id": "1",
+                        "age_months": "27.2",
+                        "file": "Adam/a.cha",
+                        "line_no": "11",
+                        "utt_id": "2",
+                        "context_k1": "",
+                        "context_k2": "",
+                        "context_k3": "",
+                        "chi_utterance_clean": "...",
+                    },
+                ],
+            )
+
+            audit = prepare_full_79_ngram_manifest(
+                bundle_root=bundle,
+                output_root=root / "run",
+                run_id="unit-full79",
+            )
+
+            self.assertEqual(audit["row_count"], 1)
+            manifest = BaselineManifest.from_path(audit["manifest_json"])
+            self.assertEqual(manifest.run_id, "unit-full79")
+            self.assertEqual(manifest.age_bins[1], "024-029")
+            self.assertTrue(manifest.train_csv.exists())
+
     def test_manifest_drives_same_length_generation_and_audit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
