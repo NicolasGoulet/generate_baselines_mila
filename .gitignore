@@ -8,6 +8,7 @@ build/
 data/
 results/
 logs/
+reports/submissions/
 slurm-*.out
 *.csv
 *.csv.gz

@@ -7,7 +7,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from generate_baselines_mila.lstm import Vocab, _encoded_examples, require_torch, run_lstm_generation
+from generate_baselines_mila.lstm import (
+    Vocab,
+    _encoded_examples,
+    _encoded_seq2seq_examples,
+    require_torch,
+    run_lstm_generation,
+)
 from generate_baselines_mila.manifest import BaselineManifest
 
 
@@ -28,6 +34,16 @@ class LstmGenerationTests(unittest.TestCase):
         self.assertEqual(labels[0], -100)
         self.assertEqual(labels[1], -100)
         self.assertNotEqual(labels[2], -100)
+
+    def test_seq2seq_examples_separate_encoder_and_decoder(self) -> None:
+        vocab = Vocab.build([["do", "you", "want", "milk"]])
+        encoded = _encoded_seq2seq_examples([(["do", "you"], ["want", "milk"])], vocab)
+        encoder_ids, decoder_ids, labels = encoded[0]
+        self.assertEqual(encoder_ids, [vocab.encode("do"), vocab.encode("you")])
+        self.assertEqual(decoder_ids, [vocab.bos_id, vocab.encode("want"), vocab.encode("milk")])
+        self.assertEqual(labels, [vocab.encode("want"), vocab.encode("milk"), vocab.eos_id])
+        empty_context = _encoded_seq2seq_examples([([], ["milk"])], vocab)[0]
+        self.assertEqual(empty_context[0], [vocab.no_context_id])
 
     def test_lstm_generation_requires_torch_when_not_installed(self) -> None:
         if importlib.util.find_spec("torch") is not None:
@@ -149,6 +165,7 @@ class LstmGenerationTests(unittest.TestCase):
                         "samples_per_target": 1,
                         "seed": 3,
                         "source_model": "lstm_smoke",
+                        "architecture": "seq2seq_lstm",
                         "model_dir": str(root / "models"),
                         "device": "cpu",
                         "epochs": 1,
@@ -169,6 +186,18 @@ class LstmGenerationTests(unittest.TestCase):
             self.assertTrue((root / "lstm_generated.csv.gz").exists())
             self.assertTrue((root / "models" / "age_index_00" / "model.pt").exists())
             self.assertTrue((root / "models" / "age_index_01" / "model.pt").exists())
+            train_audit = json.loads(
+                (root / "models" / "age_index_01" / "train_audit.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(train_audit["architecture"], "seq2seq_lstm")
+            self.assertGreater(train_audit["child_output_vocab_size"], 0)
+            self.assertTrue((root / "models" / "age_index_01" / "training_state.pt").exists())
+
+            run_lstm_generation(BaselineManifest.from_path(manifest_json))
+            resumed = json.loads(
+                (root / "models" / "age_index_01" / "train_audit.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(resumed["resumed_from_epoch"], 1)
 
 
 if __name__ == "__main__":

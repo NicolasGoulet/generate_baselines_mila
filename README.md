@@ -71,6 +71,20 @@ Run the unit tests:
 PYTHONPATH=src python3 -m unittest discover -s tests
 ```
 
+Prepare and submit the selected full-79 LSTM baseline on Mila only after the
+local tests pass and a CUDA-enabled PyTorch environment is available:
+
+```bash
+export PYTHON_CMD="$HOME/venvs/generate-baselines/bin/python"
+bash slurm/submit_full_79_lstm.sh "$SCRATCH/communicative_efficiency_data/big_cleaned_dataset/default_naturalistic_merged_006_023"
+```
+
+This trains eight additive age-bin encoder-decoder LSTMs for generation context
+`k3` and same-length output. The earlier PBM k3/k4/k5 run is already complete;
+PBM evidence did not justify tripling the full-79 run with k4 and k5. See
+`docs/lstm-baseline-pipeline.md` for the selection evidence, smoke gate,
+dependency graph, artifacts, and final audit marker.
+
 Run the cross-repo smoke test on Mila after cloning the three modular sibling
 repos into a permanent code location under `$HOME`. The smoke outputs default
 to `$SCRATCH/modular_repo_smoke/<job_id>`; keep the Git checkouts out of
