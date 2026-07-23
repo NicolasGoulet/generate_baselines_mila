@@ -31,6 +31,7 @@
   "samples_per_target": 1,
   "seed": 13,
   "source_model": "lstm",
+  "architecture": "seq2seq_lstm",
   "model_dir": "results/models/lstm_additive_child_baselines",
   "generation_length_mode": "same_as_child",
   "min_freq": 1,

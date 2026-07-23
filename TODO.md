@@ -60,6 +60,15 @@ and must not replace previous PBM proof-of-concept outputs.
 - [x] Add tests that run without torch installed by checking manifest and error
       paths, plus optional torch tests for a tiny one-epoch smoke model.
 - [ ] Add Slurm resource presets for 16GB/24GB/48GB GPU jobs.
+- [x] Add a full-79 production contract that selects PBM-supported generation
+      context k3, keeps all eight additive age-bin models, uses the
+      encoder-decoder architecture and child-side output vocabulary, and emits
+      scorer-ready provenance.
+- [x] Add a Slurm DAG with CPU preparation audit, exact-wrapper GPU smoke, two
+      production waves, wave readiness markers, validated resume behavior, and
+      a final `COMPLETE_AND_AUDITED` marker.
+- [ ] Run the full-79 k3 smoke and production DAG on Mila. Do not mark complete
+      until the compact reports and final marker have been retrieved locally.
 
 ## Scientific Comparisons
 
@@ -86,6 +95,6 @@ and must not replace previous PBM proof-of-concept outputs.
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/generate_baselines_mila_pycache PYTHONPATH=src python3 -m unittest discover -s tests
-bash -n slurm/*.sbatch
+bash -n slurm/*.sbatch slurm/*.sh
 PYTHONPATH=src python3 -m generate_baselines_mila validate-manifest --manifest configs/ngram_additive_example.json
 ```
