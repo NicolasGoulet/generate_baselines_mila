@@ -6,6 +6,7 @@ import csv
 import gzip
 import hashlib
 import json
+import os
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
@@ -33,13 +34,18 @@ def write_csv_dicts(
 ) -> int:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.stem}.tmp-{os.getpid()}{path.suffix}")
     count = 0
-    with open_text(path, "wt") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-            count += 1
+    try:
+        with open_text(temporary, "wt") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+                count += 1
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
     return count
 
 
@@ -54,4 +60,9 @@ def sha256_file(path: str | Path) -> str:
 def write_json(path: str | Path, payload: dict[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary = path.with_name(f".{path.stem}.tmp-{os.getpid()}{path.suffix}")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
