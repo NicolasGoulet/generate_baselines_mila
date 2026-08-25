@@ -13,6 +13,8 @@ PYTHON_CMD="${PYTHON_CMD:-${PYTHON:-python3}}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-3}"
 GPU_GRES="${GPU_GRES:-gpu:1}"
 GPU_CONSTRAINT="${GPU_CONSTRAINT:-}"
+COMMIT_SHA="${COMMIT_SHA:-$(git rev-parse HEAD)}"
+SUBMISSION_METADATA_JSON="$PROJECT_ROOT/reports/submissions/full79_lstm_${RUN_ID}.json"
 
 if [[ -e "$RUN_ROOT" ]]; then
   echo "Fresh RUN_ROOT required: $RUN_ROOT" >&2
@@ -23,7 +25,7 @@ if ! [[ "$MAX_CONCURRENT" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-export PROJECT_ROOT BUNDLE_ROOT RUN_ROOT PYTHON_CMD
+export PROJECT_ROOT BUNDLE_ROOT RUN_ID RUN_ROOT PYTHON_CMD COMMIT_SHA SUBMISSION_METADATA_JSON
 export EPOCHS="${EPOCHS:-20}"
 export BATCH_SIZE="${BATCH_SIZE:-256}"
 export EMBEDDING_DIM="${EMBEDDING_DIM:-256}"
@@ -87,6 +89,54 @@ FINAL_RAW="$(sbatch --parsable \
   --export="ALL,AUDIT_STAGE=final,CELL_INDICES=0-7" \
   slurm/audit_full_79_lstm.sbatch)"
 FINAL_JOB="${FINAL_RAW%%;*}"
+FINAL_REPORT_RAW="$(sbatch --parsable \
+  --ntasks=1 \
+  --dependency="afterok:$FINAL_JOB" \
+  --export=ALL \
+  slurm/report_full_79_lstm.sbatch)"
+FINAL_REPORT_JOB="${FINAL_REPORT_RAW%%;*}"
+
+export PREP_JOB SMOKE_JOB WAVE1_JOB WAVE1_AUDIT_JOB WAVE2_JOB WAVE2_AUDIT_JOB FINAL_JOB FINAL_REPORT_JOB
+python3 - "$SUBMISSION_METADATA_JSON" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+path.parent.mkdir(parents=True, exist_ok=True)
+payload = {
+    "run_id": os.environ["RUN_ID"],
+    "run_root": os.environ["RUN_ROOT"],
+    "bundle_root": os.environ["BUNDLE_ROOT"],
+    "commit_sha": os.environ["COMMIT_SHA"],
+    "python_cmd": os.environ["PYTHON_CMD"],
+    "job_ids": {
+        "preparation": os.environ["PREP_JOB"],
+        "smoke": os.environ["SMOKE_JOB"],
+        "wave1": os.environ["WAVE1_JOB"],
+        "wave1_audit": os.environ["WAVE1_AUDIT_JOB"],
+        "wave2": os.environ["WAVE2_JOB"],
+        "wave2_audit": os.environ["WAVE2_AUDIT_JOB"],
+        "final_audit": os.environ["FINAL_JOB"],
+    },
+    "final_report_job_id": os.environ["FINAL_REPORT_JOB"],
+    "configuration": {
+        "embedding_dim": int(os.environ["EMBEDDING_DIM"]),
+        "hidden_dim": int(os.environ["HIDDEN_DIM"]),
+        "num_layers": int(os.environ["NUM_LAYERS"]),
+        "epochs": int(os.environ["EPOCHS"]),
+        "batch_size": int(os.environ["BATCH_SIZE"]),
+        "dropout": float(os.environ["DROPOUT"]),
+        "seed": int(os.environ["SEED"]),
+        "generation_context": "k3",
+        "same_length": True,
+    },
+}
+temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+os.replace(temporary, path)
+PY
 
 SUBMISSION_REPORT="$PROJECT_ROOT/reports/submissions/full79_lstm_${RUN_ID}.md"
 cat > "$SUBMISSION_REPORT" <<EOF
@@ -102,12 +152,16 @@ cat > "$SUBMISSION_REPORT" <<EOF
 - wave 2 array job: \`$WAVE2_JOB\` (\`$WAVE2_INDICES\`)
 - wave 2 audit job: \`$WAVE2_AUDIT_JOB\`
 - final audit job: \`$FINAL_JOB\`
+- final state/hash report job: \`$FINAL_REPORT_JOB\`
 - maximum concurrent GPU cells: \`$MAX_CONCURRENT\`
 - Python command: \`$PYTHON_CMD\`
 - architecture: \`seq2seq_lstm\`
 - generation context: \`k3\`
 - additive age-bin models: \`8\`
 - variant: \`same_length\`
+- commit SHA: \`$COMMIT_SHA\`
+- submission metadata: \`$SUBMISSION_METADATA_JSON\`
+- scorer-ready handoff (after final audit): \`$RUN_ROOT/handoff/full79_lstm_scorer_ready.csv.gz\`
 EOF
 
 echo "RUN_ID=$RUN_ID"
@@ -119,8 +173,11 @@ echo "WAVE1_AUDIT_JOB=$WAVE1_AUDIT_JOB"
 echo "WAVE2_JOB=$WAVE2_JOB"
 echo "WAVE2_AUDIT_JOB=$WAVE2_AUDIT_JOB"
 echo "FINAL_AUDIT_JOB=$FINAL_JOB"
+echo "FINAL_REPORT_JOB=$FINAL_REPORT_JOB"
 echo "SUBMISSION_REPORT=$SUBMISSION_REPORT"
+echo "SUBMISSION_METADATA_JSON=$SUBMISSION_METADATA_JSON"
 echo "SMOKE_REPORT=$RUN_ROOT/reports/smoke/smoke_report.md"
+echo "SCORER_READY_HANDOFF=$RUN_ROOT/handoff/full79_lstm_scorer_ready.csv.gz"
 echo "Production is blocked on the exact-wrapper smoke and each later wave is blocked on the prior audit."
 echo "After the audit job finishes, run this on the local laptop to retrieve compact reports:"
 echo "  rsync -avhP 'mila:$RUN_ROOT/reports/' '/home/apaixonada/EvaPortelance/Projet_1/communicative_efficiency/results/mila_modular_runs_2026_07_08/products/full79_lstm_reports/$RUN_ID/'"

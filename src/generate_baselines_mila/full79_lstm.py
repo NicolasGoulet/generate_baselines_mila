@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import subprocess
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator, Sequence
 from datetime import datetime, timezone
@@ -20,8 +22,9 @@ from .big_cleaned import (
     _stable_id,
     _token_count,
 )
-from .io import iter_csv_dicts, open_text, sha256_file, write_json
+from .io import iter_csv_dicts, open_text, sha256_file, write_csv_dicts, write_json
 from .manifest import BaselineManifest
+from .ngram import output_fieldnames
 from .tokenize import tokenize_words
 
 DEFAULT_CONTEXTS = (3,)
@@ -346,9 +349,13 @@ def prepare_full79_lstm_run(
     manifests_dir = run_root / "manifests"
     manifests_dir.mkdir(parents=True, exist_ok=True)
     cells: list[dict[str, Any]] = []
-    carry_columns = [column for column in FULL79_LSTM_COLUMNS if column not in {"row_uid", "chi_utterance_clean"}]
+    carry_columns = [column for column in FULL79_LSTM_COLUMNS if column != "row_uid"]
+    cumulative_train_rows = 0
+    training_cells: list[dict[str, Any]] = []
+    generation_cells: list[dict[str, Any]] = []
     for context in contexts:
         for age_index, age_label in enumerate(age_labels):
+            cumulative_train_rows += prepared["age_bin_counts"][age_label]
             cell_index = len(cells)
             cell_label = f"cell_{cell_index:02d}_k{context}_{age_label}"
             manifest_path = manifests_dir / f"{cell_label}.json"
@@ -406,6 +413,27 @@ def prepare_full79_lstm_run(
                     "expected_target_rows": prepared["age_bin_counts"][age_label],
                 }
             )
+            training_cells.append(
+                {
+                    "cell_index": cell_index,
+                    "age_bin": age_label,
+                    "training_age_bins": age_labels[: age_index + 1],
+                    "expected_training_rows": cumulative_train_rows,
+                    "train_csv": str(prepared["train_csv"]),
+                    "manifest": str(manifest_path),
+                    "model_dir": str(model_dir),
+                }
+            )
+            generation_cells.append(
+                {
+                    "cell_index": cell_index,
+                    "age_bin": age_label,
+                    "expected_target_rows": prepared["age_bin_counts"][age_label],
+                    "target_csv": str(prepared["target_paths"][age_label]),
+                    "output_csv": str(output_csv),
+                    "manifest": str(manifest_path),
+                }
+            )
 
     smoke_age_label = age_labels[-1]
     smoke_target = run_root / "smoke" / "inputs" / f"target_{smoke_age_label}_{smoke_target_rows}.csv.gz"
@@ -429,6 +457,41 @@ def prepare_full79_lstm_run(
     smoke_manifest_path = manifests_dir / "smoke_manifest.json"
     write_json(smoke_manifest_path, smoke_manifest)
     write_json(manifests_dir / "cell_index.json", {"cells": cells})
+    frozen_configuration = {
+        "architecture": "seq2seq_lstm",
+        "training_scope": "strict_naturalistic_full79_additive_age_bins",
+        "generation_context_utterances": 3,
+        "same_length": True,
+        "samples_per_target": 1,
+        "embedding_dim": embedding_dim,
+        "hidden_dim": hidden_dim,
+        "num_layers": num_layers,
+        "dropout": dropout,
+        "epochs": epochs,
+        "batch_size": batch_size,
+        "seed": seed,
+        "max_context_tokens": max_context_tokens,
+    }
+    commit_sha = os.environ.get("COMMIT_SHA", "")
+    write_json(
+        manifests_dir / "training_manifest.json",
+        {
+            "commit_sha": commit_sha,
+            "configuration": frozen_configuration,
+            "train_csv": str(prepared["train_csv"]),
+            "train_sha256": sha256_file(prepared["train_csv"]),
+            "cells": training_cells,
+        },
+    )
+    write_json(
+        manifests_dir / "generation_manifest.json",
+        {
+            "commit_sha": commit_sha,
+            "configuration": frozen_configuration,
+            "expected_total_rows": prepared["row_count"],
+            "cells": generation_cells,
+        },
+    )
 
     audit = {
         "status": "PASS",
@@ -458,6 +521,9 @@ def prepare_full79_lstm_run(
         "smoke_train_examples": smoke_train_examples,
         "smoke_target_rows": smoke_target_rows,
         "train_sha256": sha256_file(prepared["train_csv"]),
+        "commit_sha": commit_sha,
+        "training_manifest": str(manifests_dir / "training_manifest.json"),
+        "generation_manifest": str(manifests_dir / "generation_manifest.json"),
     }
     report_dir = run_root / "reports" / "preparation"
     write_json(report_dir / "preparation_audit.json", audit)
@@ -506,7 +572,28 @@ def audit_lstm_output(manifest_path: str | Path) -> dict[str, Any]:
     manifest = BaselineManifest.from_path(manifest_path)
     problems: list[str] = []
     if not manifest.output_csv.exists():
-        return {"status": "FAIL", "manifest": str(manifest_path), "problems": ["missing output CSV"]}
+        target_rows = sum(1 for _ in iter_csv_dicts(manifest.target_csv))
+        expected_rows = target_rows * manifest.samples_per_target
+        return {
+            "status": "FAIL",
+            "manifest": str(manifest_path),
+            "run_id": manifest.run_id,
+            "output_csv": str(manifest.output_csv),
+            "output_rows": 0,
+            "expected_rows": expected_rows,
+            "missing_output_rows": expected_rows,
+            "duplicate_output_rows": 0,
+            "empty_generated_rows": 0,
+            "same_length_mismatches": 0,
+            "declared_length_mismatches": 0,
+            "provenance_mismatches": 0,
+            "invalid_flag_rows": 0,
+            "generation_failed_rows": 0,
+            "fallback_rows": 0,
+            "checkpoint_count": 0,
+            "output_sha256": "",
+            "problems": ["missing output CSV"],
+        }
     output_audit: dict[str, Any] = {}
     if not manifest.audit_json.exists():
         problems.append("missing output audit JSON")
@@ -516,6 +603,30 @@ def audit_lstm_output(manifest_path: str | Path) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError) as exc:
             problems.append(f"invalid output audit JSON: {exc}")
 
+    required_output_columns = {
+        "row_uid",
+        "dataset",
+        "child_id",
+        "age_months",
+        "age_bin",
+        "context_k3",
+        "generation_context_k3",
+        "chi_utterance_clean",
+        "generated_utterance",
+        "generated_word_count",
+        "target_word_count",
+        "generation_failed",
+        "fallback_used",
+        "failure_reason",
+        "fallback_reason",
+    }
+    with open_text(manifest.output_csv, "rt") as output_handle:
+        output_reader = csv.DictReader(output_handle)
+        missing_columns = sorted(required_output_columns - set(output_reader.fieldnames or []))
+    if missing_columns:
+        problems.append(f"output CSV missing required columns: {missing_columns}")
+
+    target_rows_by_uid: dict[str, dict[str, str]] = {}
     target_lengths: dict[str, int] = {}
     for row in iter_csv_dicts(manifest.target_csv):
         row_uid = row.get("row_uid", "")
@@ -525,14 +636,22 @@ def audit_lstm_output(manifest_path: str | Path) -> dict[str, Any]:
         if row_uid in target_lengths:
             problems.append(f"duplicate target row_uid: {row_uid}")
             continue
+        target_rows_by_uid[row_uid] = row
         target_lengths[row_uid] = _token_count(row.get(manifest.target_text_column, ""))
 
     seen: set[tuple[str, str]] = set()
+    matched_seen: set[tuple[str, str]] = set()
     output_count = 0
+    duplicate_output_rows = 0
     empty_generated = 0
     length_mismatches = 0
     unknown_ids = 0
     wrong_source = 0
+    failed_rows = 0
+    fallback_rows = 0
+    invalid_flag_rows = 0
+    provenance_mismatches = 0
+    length_field_mismatches = 0
     expected_source = str(manifest.raw.get("source_model", "lstm"))
     for row in iter_csv_dicts(manifest.output_csv):
         output_count += 1
@@ -540,29 +659,76 @@ def audit_lstm_output(manifest_path: str | Path) -> dict[str, Any]:
         sample_index = row.get("sample_index", "")
         key = (row_uid, sample_index)
         if key in seen:
+            duplicate_output_rows += 1
             problems.append(f"duplicate output key: {key}")
         seen.add(key)
         if row_uid not in target_lengths:
             unknown_ids += 1
             continue
+        matched_seen.add(key)
+        expected_target = target_rows_by_uid[row_uid]
+        if any(
+            row.get(column, "") != expected_target.get(column, "")
+            for column in (*manifest.id_columns, *manifest.carry_columns)
+        ):
+            provenance_mismatches += 1
         generated = row.get("generated_utterance", "")
-        if _token_count(generated) == 0:
+        generated_length = _token_count(generated)
+        if generated_length == 0:
             empty_generated += 1
-        if _token_count(generated) != target_lengths[row_uid]:
+        if generated_length != target_lengths[row_uid]:
             length_mismatches += 1
+        try:
+            declared_generated_length = int(row.get("generated_word_count", ""))
+            declared_target_length = int(row.get("target_word_count", ""))
+        except ValueError:
+            length_field_mismatches += 1
+        else:
+            if (
+                declared_generated_length != generated_length
+                or declared_target_length != target_lengths[row_uid]
+            ):
+                length_field_mismatches += 1
         if row.get("source_model") != expected_source:
             wrong_source += 1
+        failed_flag = row.get("generation_failed", "").strip().lower()
+        fallback_flag = row.get("fallback_used", "").strip().lower()
+        if failed_flag not in {"0", "1", "false", "true"} or fallback_flag not in {
+            "0",
+            "1",
+            "false",
+            "true",
+        }:
+            invalid_flag_rows += 1
+        if failed_flag in {"1", "true"}:
+            failed_rows += 1
+        if fallback_flag in {"1", "true"}:
+            fallback_rows += 1
 
     expected_count = len(target_lengths) * manifest.samples_per_target
+    expected_keys = {
+        (row_uid, str(sample_index))
+        for row_uid in target_lengths
+        for sample_index in range(manifest.samples_per_target)
+    }
+    missing_output_rows = len(expected_keys - matched_seen)
     manifest_expected = int(manifest.raw.get("expected_target_rows", len(target_lengths)))
     if len(target_lengths) != manifest_expected:
         problems.append(f"target rows {len(target_lengths)} != manifest expected {manifest_expected}")
     if output_count != expected_count:
         problems.append(f"output rows {output_count} != expected {expected_count}")
+    if missing_output_rows:
+        problems.append(f"missing target/sample output rows: {missing_output_rows}")
     if empty_generated:
         problems.append(f"empty generated rows: {empty_generated}")
     if length_mismatches:
         problems.append(f"same-length mismatches: {length_mismatches}")
+    if length_field_mismatches:
+        problems.append(f"declared word-count mismatches: {length_field_mismatches}")
+    if provenance_mismatches:
+        problems.append(f"identifier/context/target provenance mismatches: {provenance_mismatches}")
+    if invalid_flag_rows:
+        problems.append(f"invalid or empty generation/fallback flags: {invalid_flag_rows}")
     if unknown_ids:
         problems.append(f"unknown output row ids: {unknown_ids}")
     if wrong_source:
@@ -599,12 +765,154 @@ def audit_lstm_output(manifest_path: str | Path) -> dict[str, Any]:
         "output_csv": str(manifest.output_csv),
         "output_rows": output_count,
         "expected_rows": expected_count,
+        "missing_output_rows": missing_output_rows,
+        "duplicate_output_rows": duplicate_output_rows,
         "empty_generated_rows": empty_generated,
         "same_length_mismatches": length_mismatches,
+        "declared_length_mismatches": length_field_mismatches,
+        "provenance_mismatches": provenance_mismatches,
+        "invalid_flag_rows": invalid_flag_rows,
+        "generation_failed_rows": failed_rows,
+        "fallback_rows": fallback_rows,
         "checkpoint_count": len(checkpoints),
         "output_sha256": output_sha256,
         "problems": problems,
     }
+
+
+def _read_submission_metadata() -> dict[str, Any]:
+    metadata_path = os.environ.get("SUBMISSION_METADATA_JSON", "")
+    if not metadata_path:
+        return {}
+    path = Path(metadata_path)
+    if not path.is_file():
+        return {"path": metadata_path, "error": "submission metadata file is missing"}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"path": metadata_path, "error": str(exc)}
+    payload["path"] = str(path)
+    return payload
+
+
+def _slurm_accounting(submission: dict[str, Any]) -> dict[str, Any]:
+    job_ids = [str(value) for value in submission.get("job_ids", {}).values() if str(value)]
+    if not job_ids:
+        return {"records": [], "error": "no job ids were available"}
+    command = [
+        "sacct",
+        "--noheader",
+        "--parsable2",
+        "--jobs",
+        ",".join(job_ids),
+        "--format=JobIDRaw,JobName,State,ExitCode,Elapsed,Start,End",
+    ]
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        return {"records": [], "error": str(exc)}
+    records: list[dict[str, str]] = []
+    for line in completed.stdout.splitlines():
+        fields = line.split("|")
+        if len(fields) < 7:
+            continue
+        records.append(
+            dict(
+                zip(
+                    ("job_id", "job_name", "state", "exit_code", "elapsed", "start", "end"),
+                    fields[:7],
+                )
+            )
+        )
+    return {"records": records, "error": ""}
+
+
+def _publish_final_handoff(
+    run_root: Path,
+    cells: list[dict[str, Any]],
+    reports: list[dict[str, Any]],
+) -> dict[str, Any]:
+    handoff_dir = run_root / "handoff"
+    handoff_csv = handoff_dir / "full79_lstm_scorer_ready.csv.gz"
+    first_manifest = BaselineManifest.from_path(cells[0]["manifest"])
+    fieldnames = output_fieldnames(first_manifest)
+    seen: set[tuple[str, str]] = set()
+    duplicate_rows = 0
+
+    def rows() -> Iterator[dict[str, str]]:
+        nonlocal duplicate_rows
+        for cell in cells:
+            for row in iter_csv_dicts(cell["output_csv"]):
+                key = (row.get("row_uid", ""), row.get("sample_index", ""))
+                if key in seen:
+                    duplicate_rows += 1
+                    raise ValueError(f"Cross-bin duplicate handoff row: {key}")
+                seen.add(key)
+                yield row
+
+    handoff_rows = write_csv_dicts(handoff_csv, rows(), fieldnames=fieldnames)
+    expected_rows = sum(int(report["expected_rows"]) for report in reports)
+    if handoff_rows != expected_rows:
+        raise ValueError(f"Handoff rows {handoff_rows} != expected {expected_rows}")
+
+    per_bin_rows = []
+    for cell, report in zip(cells, reports):
+        per_bin_rows.append(
+            {
+                "cell_index": cell["cell_index"],
+                "age_bin": cell["age_bin"],
+                "expected_rows": report["expected_rows"],
+                "output_rows": report["output_rows"],
+                "missing_rows": report["missing_output_rows"],
+                "duplicate_rows": report["duplicate_output_rows"],
+                "length_mismatches": report["same_length_mismatches"],
+                "declared_length_mismatches": report["declared_length_mismatches"],
+                "provenance_mismatches": report["provenance_mismatches"],
+                "invalid_flag_rows": report["invalid_flag_rows"],
+                "generation_failed_rows": report["generation_failed_rows"],
+                "fallback_rows": report["fallback_rows"],
+                "output_csv": report["output_csv"],
+                "output_sha256": report["output_sha256"],
+            }
+        )
+    per_bin_audit = run_root / "reports" / "final" / "per_bin_audit.csv"
+    write_csv_dicts(per_bin_audit, per_bin_rows, fieldnames=list(per_bin_rows[0]))
+
+    manifest_path = handoff_dir / "full79_lstm_scorer_ready.manifest.json"
+    handoff_manifest = {
+        "status": "PASS",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "run_root": str(run_root),
+        "handoff_csv": str(handoff_csv),
+        "handoff_rows": handoff_rows,
+        "handoff_sha256": sha256_file(handoff_csv),
+        "training_manifest": str(run_root / "manifests" / "training_manifest.json"),
+        "generation_manifest": str(run_root / "manifests" / "generation_manifest.json"),
+        "per_bin_audit": str(per_bin_audit),
+        "duplicate_rows": duplicate_rows,
+        "missing_rows": sum(int(report["missing_output_rows"]) for report in reports),
+        "length_mismatches": sum(int(report["same_length_mismatches"]) for report in reports),
+        "declared_length_mismatches": sum(
+            int(report["declared_length_mismatches"]) for report in reports
+        ),
+        "provenance_mismatches": sum(int(report["provenance_mismatches"]) for report in reports),
+        "invalid_flag_rows": sum(int(report["invalid_flag_rows"]) for report in reports),
+        "generation_failed_rows": sum(int(report["generation_failed_rows"]) for report in reports),
+        "fallback_rows": sum(int(report["fallback_rows"]) for report in reports),
+        "source_outputs": [
+            {
+                "cell_index": cell["cell_index"],
+                "age_bin": cell["age_bin"],
+                "path": report["output_csv"],
+                "sha256": report["output_sha256"],
+            }
+            for cell, report in zip(cells, reports)
+        ],
+    }
+    write_json(manifest_path, handoff_manifest)
+    handoff_manifest["manifest_path"] = str(manifest_path)
+    handoff_manifest["manifest_sha256"] = sha256_file(manifest_path)
+    return handoff_manifest
 
 
 def parse_indices(value: str, *, maximum: int = 8) -> list[int]:
@@ -638,6 +946,16 @@ def audit_full79_lstm_run(
     status = "PASS" if not failures else "FAIL"
     expected_rows = sum(int(report["expected_rows"]) for report in reports)
     output_rows = sum(int(report["output_rows"]) for report in reports)
+    missing_rows = sum(int(report["missing_output_rows"]) for report in reports)
+    duplicate_rows = sum(int(report["duplicate_output_rows"]) for report in reports)
+    length_mismatches = sum(int(report["same_length_mismatches"]) for report in reports)
+    declared_length_mismatches = sum(
+        int(report["declared_length_mismatches"]) for report in reports
+    )
+    provenance_mismatches = sum(int(report["provenance_mismatches"]) for report in reports)
+    invalid_flag_rows = sum(int(report["invalid_flag_rows"]) for report in reports)
+    generation_failed_rows = sum(int(report["generation_failed_rows"]) for report in reports)
+    fallback_rows = sum(int(report["fallback_rows"]) for report in reports)
     summary = {
         "status": status,
         "stage": stage,
@@ -648,8 +966,20 @@ def audit_full79_lstm_run(
         "failed_cells": len(failures),
         "expected_rows": expected_rows,
         "output_rows": output_rows,
+        "missing_rows": missing_rows,
+        "duplicate_rows": duplicate_rows,
+        "same_length_mismatches": length_mismatches,
+        "declared_length_mismatches": declared_length_mismatches,
+        "provenance_mismatches": provenance_mismatches,
+        "invalid_flag_rows": invalid_flag_rows,
+        "generation_failed_rows": generation_failed_rows,
+        "fallback_rows": fallback_rows,
         "cells": reports,
     }
+    if stage == "final" and not failures and selected == list(range(8)):
+        summary["handoff"] = _publish_final_handoff(run_root, cells, reports)
+        summary["submission"] = _read_submission_metadata()
+        summary["slurm_accounting"] = _slurm_accounting(summary["submission"])
     report_dir = run_root / "reports" / stage
     write_json(report_dir / f"{stage}_summary.json", summary)
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -664,6 +994,28 @@ def audit_full79_lstm_run(
                 f"- failed cells: `{summary['failed_cells']}`",
                 f"- expected generated rows: `{expected_rows}`",
                 f"- validated generated rows: `{output_rows}`",
+                f"- missing rows: `{missing_rows}`",
+                f"- duplicate rows: `{duplicate_rows}`",
+                f"- same-length mismatches: `{length_mismatches}`",
+                f"- declared word-count mismatches: `{declared_length_mismatches}`",
+                f"- identifier/context/target provenance mismatches: `{provenance_mismatches}`",
+                f"- invalid generation/fallback flags: `{invalid_flag_rows}`",
+                f"- generation failures: `{generation_failed_rows}`",
+                f"- fallback rows: `{fallback_rows}`",
+                *(
+                    [
+                        f"- scorer-ready handoff: `{summary['handoff']['handoff_csv']}`",
+                        f"- handoff SHA-256: `{summary['handoff']['handoff_sha256']}`",
+                        f"- handoff manifest: `{summary['handoff']['manifest_path']}`",
+                        f"- handoff manifest SHA-256: `{summary['handoff']['manifest_sha256']}`",
+                        f"- commit SHA: `{summary.get('submission', {}).get('commit_sha', '')}`",
+                        f"- job IDs: `{json.dumps(summary.get('submission', {}).get('job_ids', {}), sort_keys=True)}`",
+                        f"- Slurm exit states: `{json.dumps(summary.get('slurm_accounting', {}).get('records', []), sort_keys=True)}`",
+                        "- configuration: `embedding=256 hidden=512 layers=2 epochs=20 batch=256 k3 same-length`",
+                    ]
+                    if stage == "final" and "handoff" in summary
+                    else []
+                ),
             ]
         )
         + "\n",
@@ -680,6 +1032,110 @@ def audit_full79_lstm_run(
     if marker:
         (run_root / marker).write_text(f"{marker}\n", encoding="utf-8")
     return summary
+
+
+def finalize_full79_lstm_report(run_root: str | Path) -> dict[str, Any]:
+    run_root = Path(run_root).resolve()
+    complete_marker = run_root / "COMPLETE_AND_AUDITED"
+    final_summary_path = run_root / "reports" / "final" / "final_summary.json"
+    if not complete_marker.is_file() or not final_summary_path.is_file():
+        raise FileNotFoundError("Final report requires COMPLETE_AND_AUDITED and final_summary.json")
+    final_summary = json.loads(final_summary_path.read_text(encoding="utf-8"))
+    submission = _read_submission_metadata()
+    accounting = _slurm_accounting(submission)
+    exact_records = {record["job_id"]: record for record in accounting.get("records", [])}
+    job_states: dict[str, dict[str, str]] = {}
+    problems: list[str] = []
+    for label, job_id_value in submission.get("job_ids", {}).items():
+        job_id = str(job_id_value)
+        record = exact_records.get(job_id)
+        if record is None:
+            problems.append(f"missing sacct record for {label} job {job_id}")
+            continue
+        job_states[label] = record
+        if record["state"] != "COMPLETED" or record["exit_code"] != "0:0":
+            problems.append(
+                f"{label} job {job_id} ended {record['state']} with exit {record['exit_code']}"
+            )
+    if accounting.get("error"):
+        problems.append(f"sacct query failed: {accounting['error']}")
+
+    handoff = final_summary.get("handoff", {})
+    configuration = submission.get("configuration", {})
+    hashes = {
+        "handoff_sha256": handoff.get("handoff_sha256", ""),
+        "handoff_manifest_sha256": handoff.get("manifest_sha256", ""),
+        "training_manifest_sha256": sha256_file(run_root / "manifests" / "training_manifest.json"),
+        "generation_manifest_sha256": sha256_file(run_root / "manifests" / "generation_manifest.json"),
+        "per_bin_audit_sha256": sha256_file(run_root / "reports" / "final" / "per_bin_audit.csv"),
+    }
+    report = {
+        "status": "PASS" if not problems and final_summary.get("status") == "PASS" else "FAIL",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "run_root": str(run_root),
+        "commit_sha": submission.get("commit_sha", ""),
+        "configuration": configuration,
+        "job_ids": submission.get("job_ids", {}),
+        "job_states": job_states,
+        "expected_rows": final_summary.get("expected_rows", 0),
+        "output_rows": final_summary.get("output_rows", 0),
+        "missing_rows": final_summary.get("missing_rows", 0),
+        "duplicate_rows": final_summary.get("duplicate_rows", 0),
+        "same_length_mismatches": final_summary.get("same_length_mismatches", 0),
+        "declared_length_mismatches": final_summary.get("declared_length_mismatches", 0),
+        "provenance_mismatches": final_summary.get("provenance_mismatches", 0),
+        "invalid_flag_rows": final_summary.get("invalid_flag_rows", 0),
+        "generation_failed_rows": final_summary.get("generation_failed_rows", 0),
+        "fallback_rows": final_summary.get("fallback_rows", 0),
+        "scorer_ready_handoff": handoff.get("handoff_csv", ""),
+        "handoff_manifest": handoff.get("manifest_path", ""),
+        "training_manifest": handoff.get("training_manifest", ""),
+        "generation_manifest": handoff.get("generation_manifest", ""),
+        "per_bin_audit": handoff.get("per_bin_audit", ""),
+        "hashes": hashes,
+        "problems": problems,
+    }
+    report_dir = run_root / "reports" / "final"
+    report_json = report_dir / "final_report.json"
+    write_json(report_json, report)
+    report_md = report_dir / "final_report.md"
+    markdown = [
+        "# Full-79 Additive K3 LSTM Final Report",
+        "",
+        f"- status: `{report['status']}`",
+        f"- run root: `{run_root}`",
+        f"- scorer-ready handoff: `{report['scorer_ready_handoff']}`",
+        f"- handoff manifest: `{report['handoff_manifest']}`",
+        f"- training manifest: `{report['training_manifest']}`",
+        f"- generation manifest: `{report['generation_manifest']}`",
+        f"- per-bin audit: `{report['per_bin_audit']}`",
+        f"- expected/output rows: `{report['expected_rows']}` / `{report['output_rows']}`",
+        f"- missing/duplicate rows: `{report['missing_rows']}` / `{report['duplicate_rows']}`",
+        f"- same-length/declared-length mismatches: `{report['same_length_mismatches']}` / `{report['declared_length_mismatches']}`",
+        f"- provenance mismatches: `{report['provenance_mismatches']}`",
+        f"- generation failures/fallbacks: `{report['generation_failed_rows']}` / `{report['fallback_rows']}`",
+        f"- commit SHA: `{report['commit_sha']}`",
+        f"- configuration: `{json.dumps(configuration, sort_keys=True)}`",
+        f"- hashes: `{json.dumps(hashes, sort_keys=True)}`",
+        "",
+        "## Slurm jobs",
+        "",
+    ]
+    for label, job_id in report["job_ids"].items():
+        state = job_states.get(label, {})
+        markdown.append(
+            f"- {label}: `{job_id}` state=`{state.get('state', 'MISSING')}` "
+            f"exit=`{state.get('exit_code', 'MISSING')}`"
+        )
+    if problems:
+        markdown.extend(["", "## Problems", "", *[f"- {problem}" for problem in problems]])
+    temporary_md = report_md.with_name(f".{report_md.name}.tmp-{os.getpid()}")
+    temporary_md.write_text("\n".join(markdown) + "\n", encoding="utf-8")
+    os.replace(temporary_md, report_md)
+    if report["status"] != "PASS":
+        raise RuntimeError(f"Final report failed: {problems}")
+    (run_root / "FINAL_REPORT_READY").write_text("FINAL_REPORT_READY\n", encoding="utf-8")
+    return report
 
 
 def audit_smoke(run_root: str | Path, *, job_id: str = "") -> dict[str, Any]:

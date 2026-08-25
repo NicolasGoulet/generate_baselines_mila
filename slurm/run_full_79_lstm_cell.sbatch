@@ -33,6 +33,10 @@ case "$MODE" in
     ;;
   production)
     : "${SLURM_ARRAY_TASK_ID:?production mode requires SLURM_ARRAY_TASK_ID}"
+    test -f "$RUN_ROOT/SMOKE_PASSED"
+    if (( SLURM_ARRAY_TASK_ID >= 4 )); then
+      test -f "$RUN_ROOT/WAVE1_READY"
+    fi
     MANIFEST="$("${PYTHON_RUN[@]}" -m generate_baselines_mila full79-lstm-manifest \
       --run-root "$RUN_ROOT" --index "$SLURM_ARRAY_TASK_ID")"
     ;;

@@ -120,7 +120,10 @@ This is the only production submission command. It submits:
 3. wave 1 for the first four additive age-bin models;
 4. a wave-1 output/checkpoint audit;
 5. wave 2 for the last four additive age-bin models;
-6. a wave-2 audit and final eight-model audit.
+6. a wave-2 audit and final eight-model audit, which atomically publishes the
+   combined scorer-ready handoff;
+7. a small `afterok` CPU report job that records the completed scientific job
+   states, exit codes, configuration, commit, and handoff hashes.
 
 The GPU smoke writes:
 
@@ -135,6 +138,12 @@ on `WAVE1_READY`. The run is complete only when this marker exists:
 
 ```text
 <run-root>/COMPLETE_AND_AUDITED
+```
+
+The exact Slurm-state/hash report is ready when this second marker exists:
+
+```text
+<run-root>/FINAL_REPORT_READY
 ```
 
 An empty `squeue` is not evidence of completion. Check the printed job ids with
@@ -154,6 +163,21 @@ Each of the eight production cells writes:
 - `train_audit.json`;
 - an epoch-boundary `training_state.pt` for bounded-loss resumption;
 - an output audit with checksums and row counts.
+
+Every generated row preserves the real target text and stable child, corpus,
+session, age-bin, file, line, utterance, scoring-context, and generation-context
+fields. It also has explicit `generation_failed`, `fallback_used`,
+`failure_reason`, and `fallback_reason` fields.
+
+The final audit publishes the single scoring input at:
+
+```text
+<run-root>/handoff/full79_lstm_scorer_ready.csv.gz
+```
+
+Its adjacent JSON manifest records the handoff hash and source-cell hashes.
+The final report and per-bin row/duplicate/length/provenance audits are under
+`<run-root>/reports/final/`.
 
 Interrupted files are published atomically. A rerun skips a cell only after
 the existing generated rows, lengths, source label, checkpoint, vocabularies,

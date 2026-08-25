@@ -614,6 +614,10 @@ def generate_lstm_rows(manifest: BaselineManifest) -> Iterator[dict[str, Any]]:
                 "sample_index": sample_index,
                 "generated_utterance": " ".join(generated),
                 "generated_word_count": len(generated),
+                "generation_failed": 0,
+                "fallback_used": 0,
+                "failure_reason": "",
+                "fallback_reason": "",
             }
 
 

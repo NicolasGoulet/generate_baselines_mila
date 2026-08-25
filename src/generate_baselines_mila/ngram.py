@@ -238,6 +238,10 @@ def output_fieldnames(manifest: BaselineManifest) -> list[str]:
         "generated_utterance",
         "generated_word_count",
         "target_word_count",
+        "generation_failed",
+        "fallback_used",
+        "failure_reason",
+        "fallback_reason",
     ]
     seen: set[str] = set()
     deduped: list[str] = []

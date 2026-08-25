@@ -7,10 +7,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from generate_baselines_mila.full79_lstm import (
     audit_full79_lstm_run,
     audit_lstm_output,
+    finalize_full79_lstm_report,
     load_cell_index,
     parse_indices,
     prepare_full79_lstm_run,
@@ -126,6 +128,10 @@ def materialize_valid_cell(manifest_path: Path) -> None:
                 "sample_index": "0",
                 "generated_utterance": "want milk",
                 "generated_word_count": "2",
+                "generation_failed": "0",
+                "fallback_used": "0",
+                "failure_reason": "",
+                "fallback_reason": "",
             }
         )
     write_csv_dicts(manifest.output_csv, rows, fieldnames=output_fieldnames(manifest))
@@ -183,6 +189,7 @@ class Full79LstmProductionTests(unittest.TestCase):
             self.assertEqual(payload["context_column"], "generation_context_k3")
             self.assertEqual(payload["source_model"], "lstm_additive_k3_same_length")
             self.assertTrue(payload["same_length"])
+            self.assertIn("chi_utterance_clean", payload["carry_columns"])
 
     def test_cell_audit_requires_checkpoint_vocab_and_same_length_rows(self) -> None:
         cell = load_cell_index(self.run_root)[0]
@@ -207,6 +214,12 @@ class Full79LstmProductionTests(unittest.TestCase):
         summary = audit_full79_lstm_run(run_root=self.run_root, stage="final")
         self.assertEqual(summary["status"], "PASS")
         self.assertEqual(summary["cell_count"], 8)
+        self.assertEqual(summary["missing_rows"], 0)
+        self.assertEqual(summary["duplicate_rows"], 0)
+        self.assertEqual(summary["same_length_mismatches"], 0)
+        self.assertEqual(summary["fallback_rows"], 0)
+        self.assertTrue(Path(summary["handoff"]["handoff_csv"]).exists())
+        self.assertEqual(summary["handoff"]["handoff_rows"], 79)
         self.assertTrue((self.run_root / "COMPLETE_AND_AUDITED").exists())
 
     def test_parse_indices_supports_staged_ranges(self) -> None:
@@ -214,6 +227,34 @@ class Full79LstmProductionTests(unittest.TestCase):
         self.assertEqual(parse_indices("4-7"), [4, 5, 6, 7])
         with self.assertRaises(ValueError):
             parse_indices("0-8")
+
+    def test_final_report_records_completed_job_states_and_hashes(self) -> None:
+        for cell in load_cell_index(self.run_root):
+            materialize_valid_cell(Path(cell["manifest"]))
+        audit_full79_lstm_run(run_root=self.run_root, stage="final")
+        submission_path = self.root / "submission.json"
+        job_ids = {f"stage_{index}": str(100 + index) for index in range(7)}
+        write_json(
+            submission_path,
+            {
+                "commit_sha": "abc123",
+                "configuration": {"embedding_dim": 256, "hidden_dim": 512},
+                "job_ids": job_ids,
+            },
+        )
+        stdout = "".join(
+            f"{job_id}|full79|COMPLETED|0:0|00:01:00|start|end|\n"
+            for job_id in job_ids.values()
+        )
+        completed = subprocess.CompletedProcess(args=["sacct"], returncode=0, stdout=stdout, stderr="")
+        with patch.dict(os.environ, {"SUBMISSION_METADATA_JSON": str(submission_path)}), patch(
+            "generate_baselines_mila.full79_lstm.subprocess.run", return_value=completed
+        ):
+            report = finalize_full79_lstm_report(self.run_root)
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["commit_sha"], "abc123")
+        self.assertEqual(len(report["job_states"]), 7)
+        self.assertTrue((self.run_root / "FINAL_REPORT_READY").exists())
 
 
 class Full79LstmSubmitDagTests(unittest.TestCase):
@@ -252,6 +293,7 @@ class Full79LstmSubmitDagTests(unittest.TestCase):
                     "FAKE_COUNTER": str(counter),
                     "FAKE_SBATCH_LOG": str(log),
                     "RUN_ID": "test-run",
+                    "COMMIT_SHA": "test-commit-sha",
                 }
             )
             completed = subprocess.run(
@@ -262,7 +304,7 @@ class Full79LstmSubmitDagTests(unittest.TestCase):
                 env=env,
             )
             calls = log.read_text(encoding="utf-8").splitlines()
-            self.assertEqual(len(calls), 7)
+            self.assertEqual(len(calls), 8)
             self.assertTrue(all("--ntasks=1" in call for call in calls))
             self.assertIn("afterok:101", calls[1])
             self.assertIn("afterok:102", calls[2])
@@ -270,7 +312,58 @@ class Full79LstmSubmitDagTests(unittest.TestCase):
             self.assertIn("afterok:104", calls[4])
             self.assertIn("--array=4-7%3", calls[4])
             self.assertIn("afterok:106", calls[6])
+            self.assertIn("afterok:107", calls[7])
+            self.assertIn("report_full_79_lstm.sbatch", calls[7])
             self.assertIn("FINAL_AUDIT_JOB=107", completed.stdout)
+            self.assertIn("FINAL_REPORT_JOB=108", completed.stdout)
+
+    def test_exact_cell_wrapper_exercises_smoke_path_with_fake_model_command(self) -> None:
+        repo = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            run_root = root / "run"
+            (run_root / "manifests").mkdir(parents=True)
+            (run_root / "manifests" / "smoke_manifest.json").write_text("{}\n", encoding="utf-8")
+            (run_root / "PREPARED_AND_AUDITED").write_text("PASS\n", encoding="utf-8")
+            command_log = root / "commands.log"
+            generated_marker = root / "generated"
+            fake_python = root / "fake-python"
+            fake_python.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                "printf '%s\\n' \"$*\" >> \"$FAKE_COMMAND_LOG\"\n"
+                "case \"$*\" in\n"
+                "  *'audit-lstm-output'*) [[ -f \"$FAKE_GENERATED\" ]] ;;\n"
+                "  *'generate-lstm'*) touch \"$FAKE_GENERATED\" ;;\n"
+                "  *'audit-full79-lstm-smoke'*) touch \"$RUN_ROOT/SMOKE_PASSED\" ;;\n"
+                "esac\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PROJECT_ROOT": str(repo),
+                    "RUN_ROOT": str(run_root),
+                    "PYTHON_CMD": str(fake_python),
+                    "FAKE_COMMAND_LOG": str(command_log),
+                    "FAKE_GENERATED": str(generated_marker),
+                    "SLURM_JOB_ID": "999",
+                }
+            )
+            subprocess.run(
+                ["bash", str(repo / "slurm" / "run_full_79_lstm_cell.sbatch"), "smoke"],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            calls = command_log.read_text(encoding="utf-8")
+            self.assertIn("validate-manifest", calls)
+            self.assertIn("generate-lstm", calls)
+            self.assertIn("audit-lstm-output", calls)
+            self.assertIn("audit-full79-lstm-smoke", calls)
+            self.assertTrue((run_root / "SMOKE_PASSED").exists())
 
 
 if __name__ == "__main__":

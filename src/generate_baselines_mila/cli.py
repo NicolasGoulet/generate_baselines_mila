@@ -13,6 +13,7 @@ from .full79_lstm import (
     audit_full79_lstm_run,
     audit_lstm_output,
     audit_smoke,
+    finalize_full79_lstm_report,
     manifest_for_cell,
     parse_indices,
     prepare_full79_lstm_run,
@@ -128,6 +129,12 @@ def cmd_audit_full79_lstm_smoke(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_finalize_full79_lstm_report(args: argparse.Namespace) -> int:
+    report = finalize_full79_lstm_report(args.run_root)
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="generate-baselines-mila")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -195,6 +202,10 @@ def build_parser() -> argparse.ArgumentParser:
     audit_smoke_lstm.add_argument("--run-root", required=True)
     audit_smoke_lstm.add_argument("--job-id", default="")
     audit_smoke_lstm.set_defaults(func=cmd_audit_full79_lstm_smoke)
+
+    final_report_lstm = subparsers.add_parser("finalize-full79-lstm-report")
+    final_report_lstm.add_argument("--run-root", required=True)
+    final_report_lstm.set_defaults(func=cmd_finalize_full79_lstm_report)
 
     return parser
 

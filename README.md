@@ -83,7 +83,8 @@ This trains eight additive age-bin encoder-decoder LSTMs for generation context
 `k3` and same-length output. The earlier PBM k3/k4/k5 run is already complete;
 PBM evidence did not justify tripling the full-79 run with k4 and k5. See
 `docs/lstm-baseline-pipeline.md` for the selection evidence, smoke gate,
-dependency graph, artifacts, and final audit marker.
+dependency graph, artifacts, scorer-ready handoff, and final audit/report
+markers.
 
 Run the cross-repo smoke test on Mila after cloning the three modular sibling
 repos into a permanent code location under `$HOME`. The smoke outputs default
