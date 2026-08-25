@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "scientific_role": "PBM-held-out architecture comparison for naturalistic child-response generation",
+  "held_out_evaluation_corpora": ["Brown", "Manchester", "Providence"],
+  "architectures": {
+    "babyllama_sized_llama_58m": {
+      "family": "decoder_only",
+      "initialization": "from_scratch",
+      "teacher_distillation": false,
+      "vocab_size": 16000,
+      "hidden_size": 512,
+      "intermediate_size": 1024,
+      "num_hidden_layers": 16,
+      "num_attention_heads": 8,
+      "max_position_embeddings": 256,
+      "tie_word_embeddings": false,
+      "nominal_parameter_count": 58343936
+    },
+    "t5_58m": {
+      "family": "encoder_decoder",
+      "initialization": "from_scratch",
+      "teacher_distillation": false,
+      "vocab_size": 16000,
+      "d_model": 512,
+      "d_ff": 2560,
+      "d_kv": 64,
+      "num_layers": 6,
+      "num_decoder_layers": 6,
+      "num_heads": 8,
+      "relative_attention_num_buckets": 32,
+      "tie_word_embeddings": true,
+      "nominal_parameter_count": 58540544
+    }
+  },
+  "shared_tokenizer": {
+    "type": "byte_level_bpe",
+    "vocab_size": 16000,
+    "training_scope": "non-PBM train split only",
+    "special_tokens": ["<pad>", "<s>", "</s>", "<unk>", "<turn>", "<child>"]
+  },
+  "age_bins": [
+    "006-023",
+    "024-029",
+    "030-035",
+    "036-041",
+    "042-047",
+    "048-053",
+    "054-059",
+    "060-065"
+  ],
+  "training": {
+    "maximum_epochs": 10,
+    "early_stopping_patience": 2,
+    "per_device_batch_size": 16,
+    "gradient_accumulation_steps": 16,
+    "effective_batch_size": 256,
+    "learning_rate": 0.0005,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.05,
+    "seed": 20260825,
+    "selection": "best epoch from train optimization and whole-child-disjoint validation",
+    "final_refit": "fresh initialization on development=train+validation for the selected epoch count"
+  },
+  "generation": {
+    "samples_per_target": 1,
+    "variant": "unconstrained_length",
+    "do_sample": true,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "max_new_tokens": 128,
+    "maximum_accepted_censored_fraction": 0.001
+  },
+  "downstream_scoring": {
+    "scorer": "Mistral-7B-v0.3",
+    "contexts": ["k0", "k3"],
+    "target_column": "generated_utterance",
+    "context_column": "context_k3"
+  }
+}

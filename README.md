@@ -86,6 +86,23 @@ PBM evidence did not justify tripling the full-79 run with k4 and k5. See
 dependency graph, artifacts, scorer-ready handoff, and final audit/report
 markers.
 
+Prepare the PBM-held-out small-Transformer comparison after transferring the
+audited training-expansion handoff to Mila scratch:
+
+```bash
+export PYTHON_CMD="$SCRATCH/venvs/pbm-transformers-v1/bin/python"
+bash slurm/submit_pbm_transformers.sh \
+  "$SCRATCH/communicative_efficiency_data/transformer_training_expansion/full_20260825"
+```
+
+This workflow trains 16 final models: a 58.34M-parameter BabyLlama-sized LLaMA
+decoder and a 58.54M-parameter T5-style encoder-decoder at each of eight
+cumulative age cutoffs. Both start from random weights and share a tokenizer
+learned on non-PBM training text. It generates one unconstrained response per
+PBM target and publishes a Mistral k0/k3 scorer-ready handoff only after the
+two-architecture GPU smoke, staged audits, and final censoring audit pass. See
+`docs/pbm-transformer-pipeline.md`.
+
 Run the cross-repo smoke test on Mila after cloning the three modular sibling
 repos into a permanent code location under `$HOME`. The smoke outputs default
 to `$SCRATCH/modular_repo_smoke/<job_id>`; keep the Git checkouts out of

@@ -13,6 +13,14 @@ authors = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+transformers = [
+  "torch>=2.2,<3",
+  "transformers>=4.45,<5",
+  "tokenizers>=0.20,<0.22",
+  "safetensors>=0.4,<1",
+]
+
 [project.scripts]
 generate-baselines-mila = "generate_baselines_mila.cli:main"
 
