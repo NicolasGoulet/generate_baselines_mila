@@ -3,6 +3,12 @@
 Cluster-ready baseline utterance generation for the communicative-efficiency
 project.
 
+For the current child-trained LLaMA/T5 task, start with
+[Continue on the GPU PC](docs/CONTINUE_ON_GPU_PC.md). It provides the local
+smoke command, the saved data location, and a separate Mila smoke-only command.
+The existing `submit_pbm_transformers.sh` queues full production after its smoke;
+use the new smoke-only entry point when the goal is just testing.
+
 This repository is intentionally small. It owns generation of baseline
 utterances and scorer-ready exports; it does not own CHILDES preprocessing,
 large scored outputs, Mistral scoring, or supervisor-facing reports.

@@ -1,5 +1,12 @@
 # PBM-Held-Out Small-Transformer Pipeline
 
+For the current local-PC-first workflow, read
+[Continue on the GPU PC](CONTINUE_ON_GPU_PC.md). The local entry point is
+`scripts/run_pbm_transformer_smoke_local.sh`; the Mila testing-only entry point
+is `slurm/submit_pbm_transformer_smoke_only.sh`. Both stop after the technical
+smoke audit. The full production submitter described below retains its existing
+behavior of queuing all 16 models behind the smoke gate.
+
 ## Scientific Contract
 
 This workflow compares two conditional language-model architectures trained
@@ -139,6 +146,16 @@ The submitter creates this `afterok` graph:
 Both selection and refit phases save epoch-boundary model, optimizer, and
 scheduler state. A production cell may resume after interruption. Existing
 outputs are skipped only when their complete cell audit passes.
+
+The existing smoke uses full architecture dimensions but deliberately reduced
+training and generation: one epoch, batch size at most two, accumulation one,
+at most 16 generated tokens, and a censoring allowance of 1.0. Its default input
+sizes are 1,024 training examples and 25 targets per architecture. A passing
+smoke validates the technical path; it does not validate production-length
+generation quality, the production 0.1% censoring criterion, or full-batch peak
+memory. The local smoke calls the same Python pipeline directly; it does not
+establish that the Slurm wrapper or Mila runtime works. Repeat the appropriate
+Mila smoke after transfer before production.
 
 The GPU resource contract is one task and exactly one GPU per array element.
 `GPU_GRES` accepts `gpu:1` or one typed GPU such as `gpu:l40s:1`; the submitter
