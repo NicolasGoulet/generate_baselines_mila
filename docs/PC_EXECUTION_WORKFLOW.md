@@ -35,8 +35,13 @@ its manifest passed hash verification. The dedicated runtime is
 `safetensors==0.5.2`. PyTorch reports `2.6.0+cu124`, the CUDA wheel build for
 the pinned public version, and the CUDA probe passed.
 
-Use `/home/alkan/Portelance/pc-runs` for jobs and checkpoints. Code stays in Git;
-processed data, outputs and weights stay outside Git. Never overwrite an old run.
+The prepared Samsung T7 is mounted read-write at `/media/alkan/T7` with UUID
+`E2FB-205C`. Its guarded root is
+`/media/alkan/T7/PORTELANCE_WORKSPACE`: laptop-authoritative inputs are under
+`current/laptop`, and new PC job outputs belong only under `pc-runs`. Code and
+the Python environment remain on the PC internal disk. Never overwrite an old
+run. The old Linux partition `/dev/nvme0n1p6` is outside this workflow and must
+not be accessed.
 
 ## Bounded launcher
 
@@ -68,24 +73,52 @@ use up to four CPU cores and a 12 GiB host-memory limit; the latter is not a GPU
 VRAM limit. There are no retries, implicit dependency upgrades or model downloads.
 External processes that do not use this launcher are not covered by its lock.
 
+For T7-backed work, pass `--storage-workspace` and `--storage-uuid` together.
+The runner requires the exact mounted filesystem UUID and mount root, the
+laptop-authority workspace marker, a fully verified ready publication, and
+matching latest receipt, immutable receipt, and manifest. It freezes the
+publication `content_id` and `run_id` into the job contract, then rechecks them
+before execution and while polling the child. The prepared transformer handoff
+must be below `current`; the jobs root must be exactly `pc-runs`. Symlink escapes
+are refused.
+
+Each worker holds a nonblocking shared lock on `writer.lock` for its full
+lifetime. A publisher's exclusive lock therefore blocks new jobs, and
+`freeze.json` or readiness false also blocks execution. An unplug, remount,
+UUID change, or publication change terminates the child. If the external job
+directory disappears before terminal status can be saved, the failure record
+and short diagnostic are retained under
+`~/.local/state/portelance/job-failures`. The global one-job lock still applies.
+An absent drive never causes creation of an internal fallback jobs directory,
+and `--check-only` creates no job output.
+
 Example code-validation job (agent executes; Nicolas need not copy commands):
 
 ```bash
 python3 scripts/pc_job.py submit --profile fixture-tests \
-  --python /usr/bin/python3 --jobs-root /home/alkan/Portelance/pc-runs \
+  --python /usr/bin/python3 \
+  --storage-workspace /media/alkan/T7/PORTELANCE_WORKSPACE \
+  --storage-uuid E2FB-205C \
+  --jobs-root /media/alkan/T7/PORTELANCE_WORKSPACE/pc-runs \
   --job-id fixture-UNIQUE-ID --max-seconds 180 --check-only
 python3 scripts/pc_job.py submit --profile fixture-tests \
-  --python /usr/bin/python3 --jobs-root /home/alkan/Portelance/pc-runs \
+  --python /usr/bin/python3 \
+  --storage-workspace /media/alkan/T7/PORTELANCE_WORKSPACE \
+  --storage-uuid E2FB-205C \
+  --jobs-root /media/alkan/T7/PORTELANCE_WORKSPACE/pc-runs \
   --job-id fixture-UNIQUE-ID --max-seconds 180
 python3 scripts/pc_job.py status \
-  --job-dir /home/alkan/Portelance/pc-runs/fixture-UNIQUE-ID
+  --job-dir /media/alkan/T7/PORTELANCE_WORKSPACE/pc-runs/fixture-UNIQUE-ID
 ```
 
 For the neural smoke, set `--profile pbm-smoke`, point `--python` at the dedicated
-environment and supply `--handoff` with the verified `full_20260825` directory.
+environment and supply `--handoff` as
+`/media/alkan/T7/PORTELANCE_WORKSPACE/current/laptop/portelance/INPUTS/transformer_training_expansion/full_20260825`.
 Choose an explicit maximum duration based on the technical-test scope. Read
 `docs/CONTINUE_ON_GPU_PC.md` before launching. A passed smoke establishes runtime
 and artifact integrity, not learned child-like language or publication evidence.
+The T7 attachment and full 2,873-file checksum verification passed on 2026-10-02;
+no T7-backed fixture, smoke, training, generation, or scoring job has run yet.
 
 ## Scientific sequence
 
