@@ -84,6 +84,15 @@ class JobTests(unittest.TestCase):
             self.assertEqual(status["state"], "failed")
             self.assertIn("FileNotFoundError", status["error"])
 
+    def test_cuda_torch_build_matches_public_version_pin_only(self):
+        pins = {"torch": "2.6.0", "transformers": "4.48.3"}
+        self.assertTrue(JOB.pinned_versions_match(
+            pins, {"torch": "2.6.0+cu124", "transformers": "4.48.3"}))
+        self.assertFalse(JOB.pinned_versions_match(
+            pins, {"torch": "2.6.1+cu124", "transformers": "4.48.3"}))
+        self.assertFalse(JOB.pinned_versions_match(
+            pins, {"torch": "2.6.0+cu124", "transformers": "4.48.3+local"}))
+
     def test_inactive_unit_never_reported_as_running(self):
         import contextlib
         import io
@@ -96,6 +105,37 @@ class JobTests(unittest.TestCase):
             with patch.object(JOB.subprocess, "run", return_value=response), contextlib.redirect_stdout(out):
                 JOB.status(p)
             self.assertEqual(json.loads(out.getvalue())["status"]["state"], "interrupted_or_not_running")
+
+    def test_collected_unit_defaults_do_not_override_saved_failure(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            (p / "contract.json").write_text('{"unit":"example"}')
+            (p / "status.json").write_text('{"state":"timed_out"}')
+            out = io.StringIO()
+            response = subprocess.CompletedProcess([], 0,
+                "LoadState=not-found\nActiveState=inactive\nResult=success\nExecMainStatus=0\n", "")
+            with patch.object(JOB.subprocess, "run", return_value=response), contextlib.redirect_stdout(out):
+                JOB.status(p)
+            result = json.loads(out.getvalue())
+            self.assertEqual(result["status"]["state"], "timed_out")
+            self.assertNotIn("Result", result["service"])
+
+    def test_check_only_creates_no_job_or_service(self):
+        import argparse
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory() as d:
+            args = argparse.Namespace(profile="fixture-tests", python=sys.executable,
+                jobs_root=d, job_id="dry-check", max_seconds=60, handoff=None, check_only=True)
+            out = io.StringIO()
+            with patch.object(JOB, "git_state", return_value="abc"), patch.object(JOB, "validate"), \
+                 patch.object(JOB.subprocess, "run") as run, contextlib.redirect_stdout(out):
+                JOB.submit(args)
+            self.assertFalse((Path(d) / "dry-check").exists())
+            run.assert_not_called()
+            self.assertEqual(json.loads(out.getvalue())["state"], "preflight_passed")
 
 
 if __name__ == "__main__":

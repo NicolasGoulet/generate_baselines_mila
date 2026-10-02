@@ -58,6 +58,23 @@ def command(contract, job):
     raise ValueError("Unsupported job profile")
 
 
+def pinned_versions_match(pins, versions):
+    if pins.keys() != versions.keys():
+        return False
+    for name, expected in pins.items():
+        actual = versions[name]
+        if actual == expected:
+            continue
+        # CUDA wheels expose their build as a PEP 440 local suffix even though
+        # the lock intentionally pins the public PyTorch version.
+        if name == "torch" and "+" not in expected and actual.startswith(expected + "+"):
+            local = actual[len(expected) + 1:]
+            if local and re.fullmatch(r"[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*", local):
+                continue
+        return False
+    return True
+
+
 def validate(contract, job):
     repo = Path(contract["repo"])
     if git_state(repo) != contract["commit"]:
@@ -83,7 +100,7 @@ def validate(contract, job):
                     if "==" in line and not line.startswith("#"))
         code = "import json,importlib.metadata as m;print(json.dumps({n:m.version(n) for n in " + repr(list(pins)) + "}))"
         versions = json.loads(subprocess.check_output([contract["python"], "-c", code], text=True, timeout=30))
-        if versions != pins:
+        if not pinned_versions_match(pins, versions):
             raise ValueError(f"Dedicated pinned runtime required: expected {pins}, found {versions}")
         apps = subprocess.check_output(["nvidia-smi", "--query-compute-apps=process_name",
                                         "--format=csv,noheader"], text=True, timeout=15)
@@ -213,7 +230,12 @@ def submit(args):
         c["handoff"] = str(Path(args.handoff).resolve())
         c["handoff_manifest_sha256"] = digest(Path(c["handoff"]) / "manifest.json")
     job = root / args.job_id
+    if job.exists():
+        raise ValueError("Fresh job ID required; preserve the existing run")
     validate(c, job)
+    if args.check_only:
+        print(json.dumps({"state": "preflight_passed", "contract": c, "job_dir": str(job)}))
+        return
     job.mkdir()  # Refuse reuse, including failed runs.
     write_json(job / "contract.json", c)
     write_json(job / "status.json", {"state": "submitted", "submitted_at": now()})
@@ -234,10 +256,13 @@ def status(job):
     c = json.loads((job / "contract.json").read_text())
     s = json.loads((job / "status.json").read_text())
     unit = subprocess.run(["systemctl", "--user", "show", c["unit"],
-                           "--property=ActiveState,SubState,Result,ExecMainStatus"], capture_output=True, text=True)
+                           "--property=LoadState,ActiveState,SubState,Result,ExecMainStatus"], capture_output=True, text=True)
     props = dict(line.split("=", 1) for line in unit.stdout.splitlines() if "=" in line)
     if s["state"] not in TERMINAL and props.get("ActiveState") not in {"active", "activating", "deactivating"}:
         s = {**s, "state": "interrupted_or_not_running", "saved_state": s["state"]}
+    if props.get("LoadState") == "not-found":
+        # systemd's defaults for a collected unit are not its historical exit status.
+        props = {"LoadState": "not-found", "note": "Service collected; use the saved job result"}
     print(json.dumps({"job_dir": str(job), "status": s, "service": props}, indent=2))
 
 
@@ -251,6 +276,7 @@ def main():
     p.add_argument("--job-id", required=True)
     p.add_argument("--max-seconds", type=int, required=True)
     p.add_argument("--handoff")
+    p.add_argument("--check-only", action="store_true", help="Validate without creating a job or launching computation")
     for name in ["status", "stop", "_worker"]:
         sub.add_parser(name).add_argument("--job-dir", type=Path, required=True)
     args = parser.parse_args()

@@ -27,8 +27,15 @@ PC-owned peer note. The note-exchange timer is not a research job scheduler.
 Keep the PC's existing `/home/alkan/Portelance/*` checkouts and environments
 intact. The isolated execution checkout is
 `/home/alkan/Portelance/.worktrees/pbm-pc-execution-20261002`.
-Use `/home/alkan/Portelance/pc-runs` for jobs and checkpoints; use a separate
-environment for the pinned transformer requirements. Code stays in Git;
+The verified input bundle is
+`/home/alkan/Portelance/pc-data/full_20260825_20261002`; all 36 files listed in
+its manifest passed hash verification. The dedicated runtime is
+`/home/alkan/Portelance/.venvs/pbm-transformers-20261002`, with
+`torch==2.6.0`, `transformers==4.48.3`, `tokenizers==0.21.0` and
+`safetensors==0.5.2`. PyTorch reports `2.6.0+cu124`, the CUDA wheel build for
+the pinned public version, and the CUDA probe passed.
+
+Use `/home/alkan/Portelance/pc-runs` for jobs and checkpoints. Code stays in Git;
 processed data, outputs and weights stay outside Git. Never overwrite an old run.
 
 ## Bounded launcher
@@ -39,6 +46,11 @@ manager and survives the submitting SSH session ending. It is not restarted
 automatically after a failure or reboot. After reboot an unfinished job is
 reported as interrupted, not successful. This is a single-job launcher, not an
 automatic experiment selector or a continuously awake Codex agent.
+
+On 2026-10-02, an actual fixture job completed 39 tests with one expected skip.
+A separate job capped at one second reached `timed_out` and preserved that
+terminal result after its transient service was collected. The PC had 22 GB free
+after the isolated runtime installation. No neural training or generation ran.
 
 Implemented profiles:
 
@@ -59,6 +71,9 @@ External processes that do not use this launcher are not covered by its lock.
 Example code-validation job (agent executes; Nicolas need not copy commands):
 
 ```bash
+python3 scripts/pc_job.py submit --profile fixture-tests \
+  --python /usr/bin/python3 --jobs-root /home/alkan/Portelance/pc-runs \
+  --job-id fixture-UNIQUE-ID --max-seconds 180 --check-only
 python3 scripts/pc_job.py submit --profile fixture-tests \
   --python /usr/bin/python3 --jobs-root /home/alkan/Portelance/pc-runs \
   --job-id fixture-UNIQUE-ID --max-seconds 180
