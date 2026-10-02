@@ -117,8 +117,12 @@ environment and supply `--handoff` as
 Choose an explicit maximum duration based on the technical-test scope. Read
 `docs/CONTINUE_ON_GPU_PC.md` before launching. A passed smoke establishes runtime
 and artifact integrity, not learned child-like language or publication evidence.
-The T7 attachment and full 2,873-file checksum verification passed on 2026-10-02;
-no T7-backed fixture, smoke, training, generation, or scoring job has run yet.
+The T7 attachment and full 2,873-file checksum verification passed on 2026-10-02.
+The actual T7-backed job `t7-fixtures-20261002-01` then passed 51 checks with one
+expected Torch-dependent skip in 3.2 seconds. Its contract, status, execution
+record and log remain under `PORTELANCE_WORKSPACE/pc-runs/`; the laptop holds
+hash-verified copies in `T7_SYNC_STATE/20261002/pc-attachment/fixture-job/`.
+No neural smoke, training, generation, or scoring job has run in this setup.
 
 ## Scientific sequence
 
