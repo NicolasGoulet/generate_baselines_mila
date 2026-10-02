@@ -1,5 +1,11 @@
 # Continue the child-trained transformer task on the GPU PC
 
+**2026-10-02 execution update:** Nicolas requested agent-operated PC execution.
+Read [PC execution workflow](PC_EXECUTION_WORKFLOW.md) for the disconnect-safe
+launcher, ownership and current stage definitions. The scientific design below
+remains the starting contract; the historical September status is not evidence
+of later runs.
+
 Handoff prepared on Nicolas's laptop, 22 September 2026. This document is
 self-contained: the next task does not need the laptop conversation or its
 untracked Research Brain directory.
